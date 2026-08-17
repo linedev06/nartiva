@@ -415,6 +415,7 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
 .reader-head h2 {
   font-family: var(--serif); font-weight: 500; font-size: 21px; margin: 0;
 }
+.reader-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .reader-close {
   width: 34px; height: 34px; flex-shrink: 0;
   border-radius: 50%; border: 1px solid var(--line); background: var(--surface);
@@ -423,6 +424,14 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
 }
 .reader-close:hover { background: var(--surface-2); color: var(--ink); }
 .reader-close svg { width: 15px; height: 15px; }
+
+.reader-panel:fullscreen,
+.reader-panel:-webkit-full-screen {
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+}
 
 .reader-body { flex: 1; min-height: 0; background: var(--surface-2); position: relative; overflow-y: auto; }
 .reader-frame { width: 100%; height: 100%; border: none; }
@@ -436,11 +445,25 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
   align-items: flex-start;
   justify-content: center;
   padding: 24px;
+  position: relative;
+  perspective: 1800px;
+  touch-action: pan-y;
+  cursor: grab;
 }
+.reader-pdf:active { cursor: grabbing; }
 .reader-pdf canvas {
   max-width: 100%;
   box-shadow: 0 10px 30px -12px rgba(0,0,0,0.3);
   background: #fff;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.page-flip-overlay {
+  position: absolute;
+  background: #fff;
+  box-shadow: 0 10px 34px -10px rgba(0,0,0,0.35);
+  backface-visibility: hidden;
+  pointer-events: none;
 }
 
 .reader-foot {
@@ -669,9 +692,19 @@ body.reader-open { overflow: hidden; }
         <p class="reader-eyebrow" id="reader-author"></p>
         <h2 id="reader-title"></h2>
       </div>
-      <button class="reader-close" id="reader-close" type="button" aria-label="Fechar leitura">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-      </button>
+      <div class="reader-head-actions">
+        <button class="reader-close" id="reader-fullscreen" type="button" aria-label="Tela cheia">
+          <svg class="icon-enter-fs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 3h6v6" /><path d="m21 3-7 7" /><path d="m3 21 7-7" /><path d="M9 21H3v-6" />
+          </svg>
+          <svg class="icon-exit-fs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+            <path d="m14 10 7-7m-1 7h-6V4M3 21l7-7m-6 0h6v6" />
+          </svg>
+        </button>
+        <button class="reader-close" id="reader-close" type="button" aria-label="Fechar leitura">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </div>
     </div>
     <div class="reader-body" id="reader-body">
       <div class="reader-empty" id="reader-empty">
@@ -878,6 +911,7 @@ let pdfDoc = null;
 let pdfPageNum = 1;
 let pdfBook = null;
 let pdfRendering = false;
+let pdfAnimating = false;
 let saveTimeout = null;
 
 function waitForPdfJs() {
@@ -915,20 +949,90 @@ async function renderPdfPage(num) {
 function saveProgress() {
   if (!window.supabaseClient || !pdfBook || !pdfDoc) return;
   clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(() => {
-    window.supabaseClient.rpc("update_reading_progress", {
+  saveTimeout = setTimeout(async () => {
+    const { error } = await window.supabaseClient.rpc("update_reading_progress", {
       p_book_id: pdfBook.id,
       p_current_page: pdfPageNum,
       p_total_pages: pdfDoc.numPages,
     });
+    if (error) {
+      console.error("Erro ao salvar progresso:", error);
+    } else {
+      console.log(`Progresso salvo: página ${pdfPageNum} de ${pdfDoc.numPages}`);
+    }
   }, 400);
 }
 
-async function goToPage(num) {
-  if (!pdfDoc) return;
-  pdfPageNum = Math.min(Math.max(1, num), pdfDoc.numPages);
+async function turnPage(direction) {
+  if (!pdfDoc || pdfAnimating) return;
+  const nextNum = pdfPageNum + direction;
+  if (nextNum < 1 || nextNum > pdfDoc.numPages) return;
+
+  pdfAnimating = true;
+  const canvas = document.getElementById("pdf-canvas");
+  const wrap = document.getElementById("reader-pdf");
+
+  // clona a página atual num canvas por cima, pra girar sobre a próxima
+  const overlay = document.createElement("canvas");
+  overlay.width = canvas.width;
+  overlay.height = canvas.height;
+  overlay.className = "page-flip-overlay";
+  overlay.getContext("2d").drawImage(canvas, 0, 0);
+  overlay.style.left = canvas.offsetLeft + "px";
+  overlay.style.top = canvas.offsetTop + "px";
+  overlay.style.width = canvas.clientWidth + "px";
+  overlay.style.height = canvas.clientHeight + "px";
+  overlay.style.transformOrigin = direction > 0 ? "left center" : "right center";
+  wrap.appendChild(overlay);
+
+  // já renderiza a página de destino por baixo, pronta a aparecer
+  pdfPageNum = nextNum;
   await renderPdfPage(pdfPageNum);
   saveProgress();
+
+  overlay.getBoundingClientRect(); // força reflow antes de animar
+  overlay.style.transition = "transform 460ms cubic-bezier(0.65,0,0.35,1)";
+  requestAnimationFrame(() => {
+    overlay.style.transform = `rotateY(${direction > 0 ? "-180" : "180"}deg)`;
+  });
+
+  overlay.addEventListener(
+    "transitionend",
+    () => {
+      overlay.remove();
+      pdfAnimating = false;
+    },
+    { once: true }
+  );
+}
+
+function setupDragToTurn() {
+  const wrap = document.getElementById("reader-pdf");
+  if (!wrap) return;
+  let startX = 0, startY = 0, dragging = false, moved = false;
+
+  wrap.addEventListener("pointerdown", (e) => {
+    if (!pdfDoc || pdfAnimating) return;
+    dragging = true;
+    moved = false;
+    startX = e.clientX;
+    startY = e.clientY;
+  });
+  wrap.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    if (Math.abs(e.clientX - startX) > 8 && Math.abs(e.clientX - startX) > Math.abs(e.clientY - startY)) {
+      moved = true;
+    }
+  });
+  wrap.addEventListener("pointerup", (e) => {
+    if (!dragging) return;
+    dragging = false;
+    const dx = e.clientX - startX;
+    if (moved && Math.abs(dx) > 50) {
+      turnPage(dx < 0 ? 1 : -1);
+    }
+  });
+  wrap.addEventListener("pointercancel", () => { dragging = false; });
 }
 
 async function openReader(book) {
@@ -978,12 +1082,19 @@ async function openReader(book) {
       : 1;
     pdfPageNum = startPage;
     await renderPdfPage(startPage);
-    if (!book.total_pages || book.total_pages !== pdfDoc.numPages) {
-      window.supabaseClient && window.supabaseClient.rpc("update_reading_progress", {
-        p_book_id: book.id,
-        p_current_page: startPage,
-        p_total_pages: pdfDoc.numPages,
+    if (window.supabaseClient) {
+      // quem abre o livro pra ler é quem define o "lendo agora", não o admin
+      window.supabaseClient.rpc("mark_reading", { p_book_id: book.id }).then(({ error }) => {
+        if (error) console.error("Erro ao marcar como lendo:", error);
       });
+      if (!book.total_pages || book.total_pages !== pdfDoc.numPages) {
+        const { error } = await window.supabaseClient.rpc("update_reading_progress", {
+          p_book_id: book.id,
+          p_current_page: startPage,
+          p_total_pages: pdfDoc.numPages,
+        });
+        if (error) console.error("Erro ao salvar progresso inicial:", error);
+      }
     }
   } catch (err) {
     console.error("Erro ao carregar o PDF:", err, "URL:", book.file_url);
@@ -1000,8 +1111,27 @@ function closeReader() {
   if (!overlay) return;
   overlay.classList.remove("is-open");
   document.body.classList.remove("reader-open");
+  if (document.fullscreenElement) document.exitFullscreen?.();
   pdfDoc = null;
   pdfBook = null;
+}
+
+function setupFullscreen() {
+  const btn = document.getElementById("reader-fullscreen");
+  const panel = document.querySelector(".reader-panel");
+  if (!btn || !panel) return;
+  btn.addEventListener("click", () => {
+    if (!document.fullscreenElement) {
+      panel.requestFullscreen?.();
+    } else {
+      document.exitFullscreen?.();
+    }
+  });
+  document.addEventListener("fullscreenchange", () => {
+    const isFs = document.fullscreenElement === panel;
+    btn.querySelector(".icon-enter-fs").style.display = isFs ? "none" : "block";
+    btn.querySelector(".icon-exit-fs").style.display = isFs ? "block" : "none";
+  });
 }
 
 function setupReader() {
@@ -1015,14 +1145,16 @@ function setupReader() {
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) closeReader();
   });
-  prevBtn.addEventListener("click", () => goToPage(pdfPageNum - 1));
-  nextBtn.addEventListener("click", () => goToPage(pdfPageNum + 1));
+  prevBtn.addEventListener("click", () => turnPage(-1));
+  nextBtn.addEventListener("click", () => turnPage(1));
   document.addEventListener("keydown", (e) => {
     if (!overlay.classList.contains("is-open")) return;
     if (e.key === "Escape") closeReader();
-    if (e.key === "ArrowRight") goToPage(pdfPageNum + 1);
-    if (e.key === "ArrowLeft") goToPage(pdfPageNum - 1);
+    if (e.key === "ArrowRight") turnPage(1);
+    if (e.key === "ArrowLeft") turnPage(-1);
   });
+  setupDragToTurn();
+  setupFullscreen();
 }
 
 async function boot() {
