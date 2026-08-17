@@ -970,7 +970,7 @@ async function openReader(book) {
 
   try {
     const pdfjsLib = await waitForPdfJs();
-    const loadingTask = pdfjsLib.getDocument(book.file_url);
+    const loadingTask = pdfjsLib.getDocument({ url: book.file_url });
     pdfDoc = await loadingTask.promise;
     pdfBook = book;
     const startPage = book.current_page && book.current_page > 0 && book.current_page <= pdfDoc.numPages
