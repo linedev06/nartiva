@@ -414,6 +414,7 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
 .reader-head h2 {
   font-family: var(--serif); font-weight: 500; font-size: 21px; margin: 0;
 }
+.reader-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .reader-close {
   width: 34px; height: 34px; flex-shrink: 0;
   border-radius: 50%; border: 1px solid var(--line); background: var(--surface);
@@ -422,6 +423,14 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
 }
 .reader-close:hover { background: var(--surface-2); color: var(--ink); }
 .reader-close svg { width: 15px; height: 15px; }
+
+.reader-panel:fullscreen,
+.reader-panel:-webkit-full-screen {
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+}
 
 .reader-body { flex: 1; min-height: 0; background: var(--surface-2); position: relative; overflow-y: auto; }
 .reader-frame { width: 100%; height: 100%; border: none; }
@@ -435,11 +444,25 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
   align-items: flex-start;
   justify-content: center;
   padding: 24px;
+  position: relative;
+  perspective: 1800px;
+  touch-action: pan-y;
+  cursor: grab;
 }
+.reader-pdf:active { cursor: grabbing; }
 .reader-pdf canvas {
   max-width: 100%;
   box-shadow: 0 10px 30px -12px rgba(0,0,0,0.3);
   background: #fff;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.page-flip-overlay {
+  position: absolute;
+  background: #fff;
+  box-shadow: 0 10px 34px -10px rgba(0,0,0,0.35);
+  backface-visibility: hidden;
+  pointer-events: none;
 }
 
 .reader-foot {
@@ -683,11 +706,9 @@ body.reader-open { overflow: hidden; }
           <input id="book-file" type="file" accept=".pdf,.epub" />
         </div>
 
-        <div class="checkbox-row">
-          <input id="is-reading" type="checkbox" />
-          <label for="is-reading">Marcar como "Lendo agora" na página inicial</label>
+        <div class="field" style="margin-bottom: 6px;">
+          <label style="color: var(--ink-faint);">O livro que aparece como "Lendo agora" na página inicial é definido automaticamente: é o último que foi aberto para leitura no site, não algo que você marca aqui.</label>
         </div>
-        <p class="hint" style="margin: -14px 0 22px;">O progresso de leitura (página atual) é salvo sozinho conforme o livro é lido no site, não precisa preencher aqui.</p>
 
         <button class="btn" type="submit">Publicar no acervo</button>
         <p id="upload-msg" class="form-msg"></p>
@@ -740,7 +761,6 @@ document.addEventListener("DOMContentLoaded", () => {
   els.uploadMsg = document.getElementById("upload-msg");
   els.tableBody = document.getElementById("admin-table-body");
   els.themeToggle = document.getElementById("theme-toggle");
-  els.readingCheck = document.getElementById("is-reading");
 
   if (els.themeToggle) {
     els.themeToggle.addEventListener("click", () => {
@@ -806,7 +826,6 @@ async function handleUpload(e) {
     const author = document.getElementById("author").value.trim();
     const synopsis = document.getElementById("synopsis").value.trim();
     const rating = parseFloat(document.getElementById("rating").value || "0");
-    const isReading = els.readingCheck.checked;
     const coverFile = document.getElementById("cover-file").files[0];
     const bookFile = document.getElementById("book-file").files[0];
 
@@ -816,11 +835,6 @@ async function handleUpload(e) {
     if (coverFile) cover_url = await uploadToStorage("covers", coverFile);
     if (bookFile) file_url = await uploadToStorage("books", bookFile);
 
-    if (isReading) {
-      // garante que só existe um "lendo" por vez
-      await window.supabaseClient.from("books").update({ status: "acervo" }).eq("status", "lendo");
-    }
-
     const { error } = await window.supabaseClient.from("books").insert({
       title,
       author,
@@ -828,7 +842,7 @@ async function handleUpload(e) {
       rating,
       cover_url,
       file_url,
-      status: isReading ? "lendo" : "acervo",
+      status: "acervo",
       current_page: 0,
       total_pages: 0,
     });
