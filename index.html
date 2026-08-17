@@ -986,10 +986,12 @@ async function openReader(book) {
       });
     }
   } catch (err) {
+    console.error("Erro ao carregar o PDF:", err, "URL:", book.file_url);
     pdfWrap.style.display = "none";
     nav.style.display = "none";
     empty.style.display = "grid";
-    empty.querySelector("p").textContent = "Não foi possível carregar este arquivo.";
+    empty.querySelector("p").textContent =
+      "Não foi possível carregar este arquivo. Veja o console (F12) para detalhes.";
   }
 }
 
