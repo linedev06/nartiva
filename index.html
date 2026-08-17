@@ -424,11 +424,23 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
 .reader-close:hover { background: var(--surface-2); color: var(--ink); }
 .reader-close svg { width: 15px; height: 15px; }
 
-.reader-body { flex: 1; min-height: 0; background: var(--surface-2); position: relative; }
+.reader-body { flex: 1; min-height: 0; background: var(--surface-2); position: relative; overflow-y: auto; }
 .reader-frame { width: 100%; height: 100%; border: none; }
 .reader-empty {
   height: 100%; display: grid; place-items: center;
   color: var(--ink-faint); font-size: 14px; text-align: center; padding: 30px;
+}
+.reader-pdf {
+  min-height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px;
+}
+.reader-pdf canvas {
+  max-width: 100%;
+  box-shadow: 0 10px 30px -12px rgba(0,0,0,0.3);
+  background: #fff;
 }
 
 .reader-foot {
@@ -440,9 +452,25 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
   gap: 20px;
   flex-shrink: 0;
 }
+.reader-nav {
+  display: flex; align-items: center; gap: 14px;
+  font-size: 13px; color: var(--ink-soft); font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.reader-nav-btn {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--surface);
+  display: grid; place-items: center; cursor: pointer; color: var(--ink);
+  transition: background 180ms var(--ease);
+}
+.reader-nav-btn:hover { background: var(--surface-2); }
+.reader-nav-btn:disabled { opacity: 0.35; cursor: default; }
+.reader-nav-btn svg { width: 14px; height: 14px; }
 .reader-synopsis {
   font-size: 13px; color: var(--ink-soft); margin: 0;
-  line-height: 1.5; max-width: 60ch;
+  line-height: 1.5; max-width: 40ch;
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .reader-download {
   flex-shrink: 0;
@@ -457,7 +485,8 @@ body.reader-open { overflow: hidden; }
 @media (max-width: 640px) {
   .reader-overlay { padding: 0; }
   .reader-panel { max-width: none; height: 100vh; border-radius: 0; }
-  .reader-foot { flex-direction: column; align-items: flex-start; }
+  .reader-foot { flex-direction: column; align-items: stretch; }
+  .reader-synopsis { display: none; }
 }
 
 /* ---------- footer ---------- */
@@ -563,6 +592,12 @@ body.reader-open { overflow: hidden; }
 .row-actions button:hover { color: #b3453f; }
 
 </style>
+
+<script type="module">
+  import * as pdfjsLib from "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.1.200/pdf.min.mjs";
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.1.200/pdf.worker.min.mjs";
+  window.pdfjsLib = pdfjsLib;
+</script>
 </head>
 <body>
 
@@ -642,12 +677,23 @@ body.reader-open { overflow: hidden; }
       <div class="reader-empty" id="reader-empty">
         <p>Nenhum arquivo disponível para este livro ainda.</p>
       </div>
-      <iframe id="reader-frame" class="reader-frame" title="Leitor de PDF" style="display:none;"></iframe>
+      <div class="reader-pdf" id="reader-pdf" style="display:none;">
+        <canvas id="pdf-canvas"></canvas>
+      </div>
     </div>
     <div class="reader-foot">
+      <div class="reader-nav" id="reader-nav" style="display:none;">
+        <button type="button" id="pdf-prev" class="reader-nav-btn" aria-label="Página anterior">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4 6 10l6 6"/></svg>
+        </button>
+        <span id="pdf-page-indicator">1 / 1</span>
+        <button type="button" id="pdf-next" class="reader-nav-btn" aria-label="Próxima página">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m8 4 6 6-6 6"/></svg>
+        </button>
+      </div>
       <p id="reader-synopsis" class="reader-synopsis"></p>
       <a id="reader-download" class="reader-download" href="#" target="_blank" rel="noopener">
-        Abrir em nova guia
+        Baixar arquivo
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
       </a>
     </div>
@@ -697,15 +743,14 @@ function setupThemeToggle() {
     const next = current === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
     localStorage.setItem("nartiva-theme", next);
-    btn.setAttribute("aria-pressed", String(next === "dark"));
   });
 }
 
 // ==========================================================================
-// Dados — busca no Supabase; se ainda não configurado, usa um preview local
-// para o layout não ficar vazio durante o desenvolvimento.
+// Dados — busca no Supabase; se ainda não configurado, usa uma lista vazia
 // ==========================================================================
 const DEMO_BOOKS = [];
+let currentBooks = [];
 
 async function fetchBooks() {
   if (!window.supabaseClient) return DEMO_BOOKS;
@@ -713,7 +758,7 @@ async function fetchBooks() {
     .from("books")
     .select("*")
     .order("created_at", { ascending: false });
-  if (error || !data || data.length === 0) return DEMO_BOOKS;
+  if (error || !data) return DEMO_BOOKS;
   return data;
 }
 
@@ -739,8 +784,6 @@ function renderBookCard(book, index) {
       </div>
     </article>`;
 }
-
-let currentBooks = [];
 
 function renderGrid(books) {
   const grid = document.getElementById("book-grid");
@@ -811,13 +854,89 @@ function renderReadingNow(books) {
 }
 
 // ==========================================================================
-// Tela de leitura — abre ao clicar num livro, exibe o PDF enviado no admin
+// Atualização ao vivo — qualquer alteração na tabela reflete na hora,
+// mesmo se a leitura estiver em andamento em outra aba
 // ==========================================================================
-function openReader(book) {
+function setupLiveUpdates() {
+  if (!window.supabaseClient) return;
+  window.supabaseClient
+    .channel("books-live")
+    .on("postgres_changes", { event: "*", schema: "public", table: "books" }, async () => {
+      const books = await fetchBooks();
+      renderGrid(books);
+      renderReadingNow(books);
+    })
+    .subscribe();
+}
+
+// ==========================================================================
+// Tela de leitura — renderiza o PDF de verdade (PDF.js) e acompanha a
+// página em que o leitor está, salvando o progresso sozinho, sem
+// intervenção do admin
+// ==========================================================================
+let pdfDoc = null;
+let pdfPageNum = 1;
+let pdfBook = null;
+let pdfRendering = false;
+let saveTimeout = null;
+
+function waitForPdfJs() {
+  return new Promise((resolve) => {
+    if (window.pdfjsLib) return resolve(window.pdfjsLib);
+    const check = setInterval(() => {
+      if (window.pdfjsLib) {
+        clearInterval(check);
+        resolve(window.pdfjsLib);
+      }
+    }, 50);
+  });
+}
+
+async function renderPdfPage(num) {
+  if (!pdfDoc || pdfRendering) return;
+  pdfRendering = true;
+  const page = await pdfDoc.getPage(num);
+  const canvas = document.getElementById("pdf-canvas");
+  const container = document.getElementById("reader-pdf");
+  const ctx = canvas.getContext("2d");
+  const containerWidth = Math.min(container.clientWidth - 4, 760);
+  const unscaled = page.getViewport({ scale: 1 });
+  const scale = containerWidth / unscaled.width;
+  const viewport = page.getViewport({ scale });
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  pdfRendering = false;
+  document.getElementById("pdf-page-indicator").textContent = `${num} / ${pdfDoc.numPages}`;
+  document.getElementById("pdf-prev").disabled = num <= 1;
+  document.getElementById("pdf-next").disabled = num >= pdfDoc.numPages;
+}
+
+function saveProgress() {
+  if (!window.supabaseClient || !pdfBook || !pdfDoc) return;
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    window.supabaseClient.rpc("update_reading_progress", {
+      p_book_id: pdfBook.id,
+      p_current_page: pdfPageNum,
+      p_total_pages: pdfDoc.numPages,
+    });
+  }, 400);
+}
+
+async function goToPage(num) {
+  if (!pdfDoc) return;
+  pdfPageNum = Math.min(Math.max(1, num), pdfDoc.numPages);
+  await renderPdfPage(pdfPageNum);
+  saveProgress();
+}
+
+async function openReader(book) {
   if (!book) return;
   const overlay = document.getElementById("reader-overlay");
-  const frame = document.getElementById("reader-frame");
   const empty = document.getElementById("reader-empty");
+  const pdfWrap = document.getElementById("reader-pdf");
+  const nav = document.getElementById("reader-nav");
   if (!overlay) return;
 
   document.getElementById("reader-title").textContent = book.title || "";
@@ -828,48 +947,86 @@ function openReader(book) {
 
   const downloadLink = document.getElementById("reader-download");
 
-  if (book.file_url) {
-    frame.src = book.file_url + "#toolbar=1&view=FitH";
-    frame.style.display = "block";
-    empty.style.display = "none";
-    downloadLink.href = book.file_url;
-    downloadLink.style.display = "inline-flex";
-  } else {
-    frame.src = "";
-    frame.style.display = "none";
-    empty.style.display = "grid";
-    downloadLink.style.display = "none";
-  }
-
   overlay.classList.add("is-open");
   document.body.classList.add("reader-open");
+
+  pdfDoc = null;
+  pdfBook = null;
+
+  if (!book.file_url) {
+    pdfWrap.style.display = "none";
+    nav.style.display = "none";
+    empty.style.display = "grid";
+    downloadLink.style.display = "none";
+    return;
+  }
+
+  downloadLink.href = book.file_url;
+  downloadLink.style.display = "inline-flex";
+  empty.style.display = "none";
+  pdfWrap.style.display = "flex";
+  nav.style.display = "flex";
+  document.getElementById("pdf-page-indicator").textContent = "carregando";
+
+  try {
+    const pdfjsLib = await waitForPdfJs();
+    const loadingTask = pdfjsLib.getDocument(book.file_url);
+    pdfDoc = await loadingTask.promise;
+    pdfBook = book;
+    const startPage = book.current_page && book.current_page > 0 && book.current_page <= pdfDoc.numPages
+      ? book.current_page
+      : 1;
+    pdfPageNum = startPage;
+    await renderPdfPage(startPage);
+    if (!book.total_pages || book.total_pages !== pdfDoc.numPages) {
+      window.supabaseClient && window.supabaseClient.rpc("update_reading_progress", {
+        p_book_id: book.id,
+        p_current_page: startPage,
+        p_total_pages: pdfDoc.numPages,
+      });
+    }
+  } catch (err) {
+    pdfWrap.style.display = "none";
+    nav.style.display = "none";
+    empty.style.display = "grid";
+    empty.querySelector("p").textContent = "Não foi possível carregar este arquivo.";
+  }
 }
 
 function closeReader() {
   const overlay = document.getElementById("reader-overlay");
-  const frame = document.getElementById("reader-frame");
   if (!overlay) return;
   overlay.classList.remove("is-open");
   document.body.classList.remove("reader-open");
-  frame.src = ""; // libera memória do PDF carregado
+  pdfDoc = null;
+  pdfBook = null;
 }
 
 function setupReader() {
   const overlay = document.getElementById("reader-overlay");
   const closeBtn = document.getElementById("reader-close");
+  const prevBtn = document.getElementById("pdf-prev");
+  const nextBtn = document.getElementById("pdf-next");
   if (!overlay) return;
+
   closeBtn.addEventListener("click", closeReader);
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) closeReader();
   });
+  prevBtn.addEventListener("click", () => goToPage(pdfPageNum - 1));
+  nextBtn.addEventListener("click", () => goToPage(pdfPageNum + 1));
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && overlay.classList.contains("is-open")) closeReader();
+    if (!overlay.classList.contains("is-open")) return;
+    if (e.key === "Escape") closeReader();
+    if (e.key === "ArrowRight") goToPage(pdfPageNum + 1);
+    if (e.key === "ArrowLeft") goToPage(pdfPageNum - 1);
   });
 }
 
 async function boot() {
   setupThemeToggle();
   setupReader();
+  setupLiveUpdates();
   const books = await fetchBooks();
   renderGrid(books);
   renderReadingNow(books);
