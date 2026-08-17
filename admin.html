@@ -845,8 +845,20 @@ async function handleUpload(e) {
   }
 }
 
+function sanitizeFileName(name) {
+  const dot = name.lastIndexOf(".");
+  const base = dot > -1 ? name.slice(0, dot) : name;
+  const ext = dot > -1 ? name.slice(dot) : "";
+  const cleanBase = base
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // remove acentos
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  return (cleanBase || "arquivo") + ext.toLowerCase();
+}
+
 async function uploadToStorage(bucket, file) {
-  const path = `${Date.now()}-${file.name}`;
+  const path = `${Date.now()}-${sanitizeFileName(file.name)}`;
   const { error } = await window.supabaseClient.storage.from(bucket).upload(path, file);
   if (error) throw error;
   const { data } = window.supabaseClient.storage.from(bucket).getPublicUrl(path);
