@@ -433,10 +433,40 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
   border-radius: 0;
 }
 
-/* tela cheia: some tudo, fica só o quadrado do livro */
+/* tela cheia própria via CSS — não depende da Fullscreen API do navegador,
+   que é inconsistente no mobile (Safari iOS não suporta em elementos comuns) */
+.reader-panel.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  border-radius: 0;
+  z-index: 200;
+}
+
+/* tela cheia: some tudo, fica só o quadrado do livro. Um toque na área de
+   leitura mostra/esconde os controles de novo — padrão de apps de leitura
+   e vídeo, já que no mobile não existe tecla Esc pra sair */
 .reader-panel.is-fullscreen .reader-head,
 .reader-panel.is-fullscreen .reader-foot {
   display: none;
+}
+.reader-panel.is-fullscreen.show-controls .reader-head {
+  display: flex;
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
+}
+.reader-panel.is-fullscreen.show-controls .reader-foot {
+  display: flex;
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px);
 }
 .reader-panel.is-fullscreen .reader-body { height: 100%; }
 
@@ -1037,6 +1067,12 @@ function setupDragToTurn() {
     const dx = e.clientX - startX;
     if (moved && Math.abs(dx) > 50) {
       turnPage(dx < 0 ? 1 : -1);
+    } else if (!moved) {
+      // toque simples (sem arrasto): mostra/esconde os controles em tela cheia
+      const panel = document.querySelector(".reader-panel");
+      if (panel && panel.classList.contains("is-fullscreen")) {
+        panel.classList.toggle("show-controls");
+      }
     }
   });
   wrap.addEventListener("pointercancel", () => { dragging = false; });
@@ -1115,10 +1151,11 @@ async function openReader(book) {
 
 function closeReader() {
   const overlay = document.getElementById("reader-overlay");
+  const panel = document.querySelector(".reader-panel");
   if (!overlay) return;
   overlay.classList.remove("is-open");
   document.body.classList.remove("reader-open");
-  if (document.fullscreenElement) document.exitFullscreen?.();
+  if (panel) { panel.classList.remove("is-fullscreen"); panel.classList.remove("show-controls"); }
   pdfDoc = null;
   pdfBook = null;
 }
@@ -1128,17 +1165,10 @@ function setupFullscreen() {
   const panel = document.querySelector(".reader-panel");
   if (!btn || !panel) return;
   btn.addEventListener("click", () => {
-    if (!document.fullscreenElement) {
-      panel.requestFullscreen?.();
-    } else {
-      document.exitFullscreen?.();
-    }
-  });
-  document.addEventListener("fullscreenchange", () => {
-    const isFs = document.fullscreenElement === panel;
+    const isFs = panel.classList.toggle("is-fullscreen");
+    panel.classList.remove("show-controls");
     btn.querySelector(".icon-enter-fs").style.display = isFs ? "none" : "block";
     btn.querySelector(".icon-exit-fs").style.display = isFs ? "block" : "none";
-    panel.classList.toggle("is-fullscreen", isFs);
   });
 }
 
@@ -1158,7 +1188,17 @@ function setupReader() {
   document.addEventListener("keydown", (e) => {
     if (!overlay.classList.contains("is-open")) return;
     if (e.key === "Escape") {
-      if (document.fullscreenElement) return; // 1º Esc só sai da tela cheia
+      const panel = document.querySelector(".reader-panel");
+      if (panel && panel.classList.contains("is-fullscreen")) {
+        panel.classList.remove("is-fullscreen");
+        panel.classList.remove("show-controls");
+        const fsBtn = document.getElementById("reader-fullscreen");
+        if (fsBtn) {
+          fsBtn.querySelector(".icon-enter-fs").style.display = "block";
+          fsBtn.querySelector(".icon-exit-fs").style.display = "none";
+        }
+        return; // 1º Esc só sai da tela cheia
+      }
       closeReader();
     }
     if (e.key === "ArrowRight") turnPage(1);
