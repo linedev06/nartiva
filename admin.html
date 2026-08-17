@@ -423,11 +423,23 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
 .reader-close:hover { background: var(--surface-2); color: var(--ink); }
 .reader-close svg { width: 15px; height: 15px; }
 
-.reader-body { flex: 1; min-height: 0; background: var(--surface-2); position: relative; }
+.reader-body { flex: 1; min-height: 0; background: var(--surface-2); position: relative; overflow-y: auto; }
 .reader-frame { width: 100%; height: 100%; border: none; }
 .reader-empty {
   height: 100%; display: grid; place-items: center;
   color: var(--ink-faint); font-size: 14px; text-align: center; padding: 30px;
+}
+.reader-pdf {
+  min-height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px;
+}
+.reader-pdf canvas {
+  max-width: 100%;
+  box-shadow: 0 10px 30px -12px rgba(0,0,0,0.3);
+  background: #fff;
 }
 
 .reader-foot {
@@ -439,9 +451,25 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
   gap: 20px;
   flex-shrink: 0;
 }
+.reader-nav {
+  display: flex; align-items: center; gap: 14px;
+  font-size: 13px; color: var(--ink-soft); font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.reader-nav-btn {
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--surface);
+  display: grid; place-items: center; cursor: pointer; color: var(--ink);
+  transition: background 180ms var(--ease);
+}
+.reader-nav-btn:hover { background: var(--surface-2); }
+.reader-nav-btn:disabled { opacity: 0.35; cursor: default; }
+.reader-nav-btn svg { width: 14px; height: 14px; }
 .reader-synopsis {
   font-size: 13px; color: var(--ink-soft); margin: 0;
-  line-height: 1.5; max-width: 60ch;
+  line-height: 1.5; max-width: 40ch;
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .reader-download {
   flex-shrink: 0;
@@ -456,7 +484,8 @@ body.reader-open { overflow: hidden; }
 @media (max-width: 640px) {
   .reader-overlay { padding: 0; }
   .reader-panel { max-width: none; height: 100vh; border-radius: 0; }
-  .reader-foot { flex-direction: column; align-items: flex-start; }
+  .reader-foot { flex-direction: column; align-items: stretch; }
+  .reader-synopsis { display: none; }
 }
 
 /* ---------- footer ---------- */
@@ -658,17 +687,7 @@ body.reader-open { overflow: hidden; }
           <input id="is-reading" type="checkbox" />
           <label for="is-reading">Marcar como "Lendo agora" na página inicial</label>
         </div>
-
-        <div id="reading-fields" class="field-row" style="display:none;">
-          <div class="field">
-            <label for="current-page">Página atual</label>
-            <input id="current-page" type="number" min="0" value="0" />
-          </div>
-          <div class="field">
-            <label for="total-page">Total de páginas</label>
-            <input id="total-page" type="number" min="0" value="0" />
-          </div>
-        </div>
+        <p class="hint" style="margin: -14px 0 22px;">O progresso de leitura (página atual) é salvo sozinho conforme o livro é lido no site, não precisa preencher aqui.</p>
 
         <button class="btn" type="submit">Publicar no acervo</button>
         <p id="upload-msg" class="form-msg"></p>
@@ -719,10 +738,9 @@ document.addEventListener("DOMContentLoaded", () => {
   els.logoutBtn = document.getElementById("logout-btn");
   els.uploadForm = document.getElementById("upload-form");
   els.uploadMsg = document.getElementById("upload-msg");
-  els.readingCheck = document.getElementById("is-reading");
-  els.readingFields = document.getElementById("reading-fields");
   els.tableBody = document.getElementById("admin-table-body");
   els.themeToggle = document.getElementById("theme-toggle");
+  els.readingCheck = document.getElementById("is-reading");
 
   if (els.themeToggle) {
     els.themeToggle.addEventListener("click", () => {
@@ -744,9 +762,6 @@ document.addEventListener("DOMContentLoaded", () => {
   els.loginForm.addEventListener("submit", handleLogin);
   els.logoutBtn.addEventListener("click", handleLogout);
   els.uploadForm.addEventListener("submit", handleUpload);
-  els.readingCheck.addEventListener("change", () => {
-    els.readingFields.style.display = els.readingCheck.checked ? "grid" : "none";
-  });
 });
 
 async function checkSession() {
@@ -792,8 +807,6 @@ async function handleUpload(e) {
     const synopsis = document.getElementById("synopsis").value.trim();
     const rating = parseFloat(document.getElementById("rating").value || "0");
     const isReading = els.readingCheck.checked;
-    const currentPage = parseInt(document.getElementById("current-page").value || "0", 10);
-    const totalPages = parseInt(document.getElementById("total-page").value || "0", 10);
     const coverFile = document.getElementById("cover-file").files[0];
     const bookFile = document.getElementById("book-file").files[0];
 
@@ -816,8 +829,8 @@ async function handleUpload(e) {
       cover_url,
       file_url,
       status: isReading ? "lendo" : "acervo",
-      current_page: isReading ? currentPage : 0,
-      total_pages: isReading ? totalPages : 0,
+      current_page: 0,
+      total_pages: 0,
     });
 
     if (error) throw error;
@@ -825,7 +838,6 @@ async function handleUpload(e) {
     els.uploadMsg.textContent = "Livro adicionado ao acervo.";
     els.uploadMsg.className = "form-msg ok";
     els.uploadForm.reset();
-    els.readingFields.style.display = "none";
     loadBooks();
   } catch (err) {
     els.uploadMsg.textContent = "Erro ao enviar: " + err.message;
