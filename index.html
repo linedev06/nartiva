@@ -433,6 +433,13 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
   border-radius: 0;
 }
 
+/* tela cheia: some tudo, fica só o quadrado do livro */
+.reader-panel.is-fullscreen .reader-head,
+.reader-panel.is-fullscreen .reader-foot {
+  display: none;
+}
+.reader-panel.is-fullscreen .reader-body { height: 100%; }
+
 .reader-body { flex: 1; min-height: 0; background: var(--surface-2); position: relative; overflow-y: auto; }
 .reader-frame { width: 100%; height: 100%; border: none; }
 .reader-empty {
@@ -1131,6 +1138,7 @@ function setupFullscreen() {
     const isFs = document.fullscreenElement === panel;
     btn.querySelector(".icon-enter-fs").style.display = isFs ? "none" : "block";
     btn.querySelector(".icon-exit-fs").style.display = isFs ? "block" : "none";
+    panel.classList.toggle("is-fullscreen", isFs);
   });
 }
 
@@ -1149,7 +1157,10 @@ function setupReader() {
   nextBtn.addEventListener("click", () => turnPage(1));
   document.addEventListener("keydown", (e) => {
     if (!overlay.classList.contains("is-open")) return;
-    if (e.key === "Escape") closeReader();
+    if (e.key === "Escape") {
+      if (document.fullscreenElement) return; // 1º Esc só sai da tela cheia
+      closeReader();
+    }
     if (e.key === "ArrowRight") turnPage(1);
     if (e.key === "ArrowLeft") turnPage(-1);
   });
