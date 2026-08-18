@@ -495,8 +495,7 @@ nav.main-nav a:hover::after { transform: scaleX(1); transform-origin: left; }
   background: #fff;
   user-select: none;
   -webkit-user-drag: none;
-  transform-origin: center center;
-  transition: transform 120ms var(--ease);
+  touch-action: none;
 }
 .page-flip-overlay {
   position: absolute;
@@ -661,6 +660,7 @@ body.reader-open { overflow: hidden; }
   pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.1.200/pdf.worker.min.mjs";
   window.pdfjsLib = pdfjsLib;
 </script>
+<script src="https://cdn.jsdelivr.net/npm/@panzoom/panzoom@9.4.3/dist/panzoom.min.js"></script>
 </head>
 <body>
 
@@ -1050,81 +1050,68 @@ async function turnPage(direction) {
 function setupDragToTurn() {
   const wrap = document.getElementById("reader-pdf");
   if (!wrap) return;
-
-  const pointers = new Map();
-  let dragStartX = 0, dragStartY = 0, dragging = false, moved = false;
-  let pinchStartDist = 0, pinchStartZoom = 1;
-
-  function dist(a, b) {
-    return Math.hypot(a.x - b.x, a.y - b.y);
-  }
+  let startX = 0, startY = 0, dragging = false, moved = false;
 
   wrap.addEventListener("pointerdown", (e) => {
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-    if (pointers.size === 2) {
-      // começou um pinça: cancela o arrasto de virar página
-      dragging = false;
-      const [a, b] = [...pointers.values()];
-      pinchStartDist = dist(a, b);
-      pinchStartZoom = currentZoom;
-    } else if (pointers.size === 1) {
-      if (!pdfDoc || pdfAnimating) return;
-      dragging = true;
-      moved = false;
-      dragStartX = e.clientX;
-      dragStartY = e.clientY;
-    }
+    if (!pdfDoc || pdfAnimating) return;
+    if (isZoomedIn()) return; // com zoom ativo, o arrasto pertence ao panzoom
+    dragging = true;
+    moved = false;
+    startX = e.clientX;
+    startY = e.clientY;
   });
-
   wrap.addEventListener("pointermove", (e) => {
-    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-    if (pointers.size === 2) {
-      const [a, b] = [...pointers.values()];
-      const newDist = dist(a, b);
-      if (pinchStartDist > 0) {
-        setZoom(pinchStartZoom * (newDist / pinchStartDist));
-      }
-      return;
-    }
-
     if (!dragging) return;
-    if (Math.abs(e.clientX - dragStartX) > 8 && Math.abs(e.clientX - dragStartX) > Math.abs(e.clientY - dragStartY)) {
+    if (Math.abs(e.clientX - startX) > 8 && Math.abs(e.clientX - startX) > Math.abs(e.clientY - startY)) {
       moved = true;
     }
   });
-
-  function endPointer(e) {
-    pointers.delete(e.pointerId);
-    if (pointers.size < 2) pinchStartDist = 0;
-    if (pointers.size === 0 && dragging) {
-      dragging = false;
-      if (currentZoom > 1.02) return; // com zoom ativo, arrasto não vira página
-      const dx = e.clientX - dragStartX;
-      if (moved && Math.abs(dx) > 50) {
-        turnPage(dx < 0 ? 1 : -1);
-      } else if (!moved) {
-        const panel = document.querySelector(".reader-panel");
-        if (panel && panel.classList.contains("is-fullscreen")) {
-          panel.classList.toggle("show-controls");
-        }
+  wrap.addEventListener("pointerup", (e) => {
+    if (!dragging) return;
+    dragging = false;
+    const dx = e.clientX - startX;
+    if (moved && Math.abs(dx) > 50) {
+      turnPage(dx < 0 ? 1 : -1);
+    } else if (!moved) {
+      // toque simples (sem arrasto): mostra/esconde os controles em tela cheia
+      const panel = document.querySelector(".reader-panel");
+      if (panel && panel.classList.contains("is-fullscreen")) {
+        panel.classList.toggle("show-controls");
       }
     }
-  }
-
-  wrap.addEventListener("pointerup", endPointer);
-  wrap.addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); dragging = false; });
+  });
+  wrap.addEventListener("pointercancel", () => { dragging = false; });
 }
 
-let currentZoom = 1;
-function setZoom(z) {
-  currentZoom = Math.min(3, Math.max(1, z));
+// ==========================================================================
+// Zoom suave com o dedo — usa a biblioteca Panzoom (pequena, com aceleração
+// de GPU). panOnlyWhenZoomed garante que arrastar só vira página quando a
+// pessoa NÃO está com zoom; com zoom, o arrasto navega pela página ampliada.
+// ==========================================================================
+let panzoomInstance = null;
+
+function isZoomedIn() {
+  return !!panzoomInstance && panzoomInstance.getScale() > 1.02;
+}
+
+function setupZoom() {
   const canvas = document.getElementById("pdf-canvas");
-  if (canvas) canvas.style.transform = `scale(${currentZoom})`;
+  if (!canvas || !window.Panzoom) return;
+  if (panzoomInstance) panzoomInstance.destroy();
+  panzoomInstance = window.Panzoom(canvas, {
+    maxScale: 3,
+    minScale: 1,
+    contain: "outside",
+    panOnlyWhenZoomed: true,
+    cursor: "default",
+  });
+  canvas.parentElement.addEventListener("wheel", (e) => {
+    if (e.ctrlKey) panzoomInstance.zoomWithWheel(e);
+  });
 }
+
 function resetZoom() {
-  setZoom(1);
+  if (panzoomInstance) panzoomInstance.reset({ animate: false });
 }
 
 async function openReader(book) {
@@ -1175,6 +1162,7 @@ async function openReader(book) {
       : 1;
     pdfPageNum = startPage;
     await renderPdfPage(startPage);
+    setupZoom();
     if (window.supabaseClient) {
       // quem abre o livro pra ler é quem define o "lendo agora", não o admin
       window.supabaseClient.rpc("mark_reading", { p_book_id: book.id }).then(({ error }) => {
