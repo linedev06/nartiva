@@ -1156,7 +1156,10 @@ async function openReader(book) {
 
   try {
     const pdfjsLib = await waitForPdfJs();
-    const loadingTask = pdfjsLib.getDocument({ url: book.file_url });
+    const response = await fetch(book.file_url);
+    if (!response.ok) throw new Error(`Falha ao baixar o arquivo (HTTP ${response.status})`);
+    const arrayBuffer = await response.arrayBuffer();
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
     pdfDoc = await loadingTask.promise;
     pdfBook = book;
     const startPage = book.current_page && book.current_page > 0 && book.current_page <= pdfDoc.numPages
@@ -1180,12 +1183,13 @@ async function openReader(book) {
       }
     }
   } catch (err) {
-    console.error("Erro ao carregar o PDF:", err, "URL:", book.file_url);
+    console.error("Erro ao carregar o PDF:", err.name || "", "-", err.message, "| URL:", book.file_url);
     pdfWrap.style.display = "none";
     nav.style.display = "none";
     empty.style.display = "grid";
-    empty.querySelector("p").textContent =
-      "Não foi possível carregar este arquivo. Veja o console (F12) para detalhes.";
+    empty.querySelector("p").textContent = err.message?.includes("Falha ao baixar")
+      ? "Não foi possível baixar este arquivo (provável bloqueio de CORS no Storage)."
+      : "Não foi possível carregar este arquivo. Veja o console (F12) para detalhes.";
   }
 }
 
