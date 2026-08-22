@@ -647,11 +647,13 @@ body.reader-open { overflow: hidden; }
   background: var(--surface-2); color: var(--ink-soft);
 }
 .tag.reading { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.row-actions { display: flex; gap: 14px; }
 .row-actions button {
   background: none; border: none; color: var(--ink-faint); cursor: pointer; font-size: 12.5px;
   text-decoration: underline; padding: 0;
 }
 .row-actions button:hover { color: #b3453f; }
+.row-actions button[data-edit-id]:hover { color: var(--accent); }
 
 </style>
 
